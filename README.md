@@ -22,8 +22,8 @@
 - Local LLM Framework: Ollama
   
 ### SQL Agent Graph
-  - `force_list_tables` & `list_table_action`: Force the to retrieval the tables from the database.
-  - `force_get_schema` & `get_schema_action`: Force the retrieval the schema for all tables from the database.
+  - `force_list_tables` & `list_table_action`: Force the retrieval of the tables from the database.
+  - `force_get_schema` & `get_schema_action`: Force the retrieval of the schema for all tables from the database.
   - `query_gen_agent`: LLM node. Generates SQL query in response to user question and asesses whether the response is correct.
   - `sql_db_query_action`: Action node that executes SQL queries against the database.
   <p align="center">

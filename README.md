@@ -27,7 +27,7 @@
   - `query_gen_agent`: LLM node. Generates SQL query in response to user question and asesses whether the response is correct.
   - `sql_db_query_action`: Action node that executes SQL queries against the database.
   <p align="center">
-      <img src="https://github.com/user-attachments/assets/222d3c9d-4cfb-4826-9a51-248dcf27658e" />
+      <img src="sql_agent_graph.PNG" />
   </p>
 
 ## Project Structure

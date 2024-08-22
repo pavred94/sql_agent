@@ -24,7 +24,7 @@ from langchain_core.tools import BaseTool
 class FinalResponse(BaseModel):
     """Final response to the user"""
 
-    final_answer: float = Field(description="An accurate and descriptive response")
+    final_answer: float = Field(description="An full, accurate and descriptive response.")
 
 
 class AgentState(TypedDict):
@@ -56,7 +56,7 @@ class SQLAgent:
         graph.add_node("list_tables_action", self.create_tool_node_with_fallback([self.tools["sql_db_list_tables"]]))
         graph.add_node("get_schema_action", self.create_tool_node_with_fallback([self.tools["sql_db_schema"]]))
         graph.add_node("query_gen_agent", self.query_gen_agent)
-        graph.add_node("sql_db_query_action", self.call_sql_db_query_tool)
+        graph.add_node("sql_db_query_action", self.create_tool_node_with_fallback([self.sql_db_query]))
 
         # Edges
         graph.add_edge(START, "force_list_tables")
@@ -142,16 +142,30 @@ class SQLAgent:
         """ Binds prompt and tools (sql_db_query, FinalResponse) to LLM """
 
         template = """
-        You are a SQL expert with a strong attention to detail.
+        You are a friendly PostgreSQL expert with a strong attention to detail.
         
-        If you see "Success" in the results of the query, stop and initiate the "FinalResponse" tool!
+        "Required criteria before execution" 
+        1 - Tools are delimited with triple backticks.
+        2 - Prompt headers are delimited with double quotes.
+        3 - DO NOT MAKE UP INFORMATION under any circumstances.
+        4 - Your final answer MUST BE of the format stated in "Final Answer Format".
         
-        If you are missing information or do not understand the question, initiate the "FinalResponse" tool and inform the user!
-        DO NOT MAKE UP INFORMATION under any circumstances.
+        "Your task is to carry out the user's action via the following steps in order"
+        Step 1 - Process the user's action and determine what information 
+                 you need to answer it based on the already retrieved tables and database schema.
+        Step 2 - Determine the set of syntactically correct set of PostgreSQL queries necessary to carry out the user's action.
+                 Reference the "SQL Rules" section for guidelines when generating SQL queries.
+                 DO NOT use solely the database schema to answer the user's action unless explicitly told to do so.
+        Step 3 - Use ```sql_db_query``` to run the SQL queries against the database. 
+        Step 4 - If at least one of the following numbered criteria is met, go to Step 5, otherwise go to Step 1.
+                 1 - You do not have the information necessary to perform the user's action.
+                 2 - You get a duplicate key error.
+                 3 - You have determined that the user's action was unsuccessful and you cannot resolve it.
+                 4 - All SQL queries were successfully executed, you have double-checked the results 
+                     and have determined the user's action was executed successfully.
+        Step 5 - Execute ```FinalResponse``` and format the final answer via "Final Answer Format".
         
-        Given an input question, output a syntactically correct PostgreSQL query to run against the database, 
-        then look at the results of the query and return the answer.
-        
+        "SQL Rules"
         Double check the PostgreSQL query for common mistakes, including:
         - Using NOT IN with NULL values
         - Using UNION when UNION ALL should have been used
@@ -161,23 +175,11 @@ class SQLAgent:
         - Using the correct number of arguments for functions
         - Casting to the correct data type
         - Using the proper columns for joins
-
-        If there are any of the above mistakes, rewrite the query. If there are no mistakes, just reproduce the original query.
-
-        When generating the query:
         
-        Tools: sql_db_query.
-
-        Output the SQL query that answers the input question without a tool call.
-
-        Unless the user specifies a specific number of examples they wish to obtain, limit your query to at most 10 results.
-        If the user specifies "all", print all results.
-        Never query for all the columns from a specific table, only ask for the relevant columns given the question.
-        
-        If you get an error while executing a query, rewrite the query and try again.
-
-        DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
-        Exceptions: INSERT and UPDATE statements are accepted.
+        "Final Answer Format"
+        1 - SQL Queries: List of SQL queries used.
+        2 - Final answer: Chat-like response to user's action.
+        3 - Reasoning: Brief summary of how the action was carried out.
         """
         query_gen_prompt = ChatPromptTemplate.from_messages(
             [("system", template), ("placeholder", "{messages}")]

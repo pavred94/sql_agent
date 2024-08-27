@@ -24,7 +24,9 @@ from langchain_core.tools import BaseTool
 class FinalResponse(BaseModel):
     """Final response to the user"""
 
-    final_answer: float = Field(description="An full, accurate and descriptive response.")
+    final_answer: str = Field(description="A full, accurate and descriptive response.")
+    reasoning: str = Field(description="Steps to get to the final answer.")
+    sql_query: str = Field(description="SQL queries used to get to the final answer.")
 
 
 class AgentState(TypedDict):
@@ -74,38 +76,6 @@ class SQLAgent:
         # Generate graph
         self.graph = graph.compile(checkpointer=checkpointer)
 
-    def call_sql_db_query_tool(self, state: AgentState) -> dict[str, list[ToolMessage]]:
-        """
-        Modified version of ToolNode for sql_db_query.
-        Prepends tool messages with "Success:" for a successful query execution.
-        """
-        messages = state["messages"]
-
-        last_message = messages[-1]
-        tool_invocations = []
-        for tool_call in last_message.tool_calls:
-            action = ToolInvocation(
-                tool=tool_call["name"],
-                tool_input=tool_call["args"],
-            )
-            tool_invocations.append(action)
-
-        tool_executor = ToolExecutor([self.sql_db_query])
-        responses = tool_executor.batch(tool_invocations, return_exceptions=True)
-        # Empty string and no explicit error message == Success
-        if not (responses[0] and responses[0].startswith("Error:")):
-            responses[0] = "Success: " + responses[0]
-        # We use the response to create tool messages
-        tool_messages = [
-            ToolMessage(
-                content=str(response),
-                name=tc["name"],
-                tool_call_id=tc["id"],
-            )
-            for tc, response in zip(last_message.tool_calls, responses)
-        ]
-        return {"messages": tool_messages}
-
     def force_list_tables(self, state: AgentState) -> dict[str, list[AIMessage]]:
         """ Generates an AI Message to force the Agent to retrieve all the SQL tables"""
 
@@ -144,13 +114,14 @@ class SQLAgent:
         template = """
         You are a friendly PostgreSQL expert with a strong attention to detail.
         
-        "Required criteria before execution" 
+        # Required criteria before execution
         1 - Tools are delimited with triple backticks.
-        2 - Prompt headers are delimited with double quotes.
+        2 - Prompt headers are preceded by a pound sign (#).
         3 - DO NOT MAKE UP INFORMATION under any circumstances.
         4 - Your final answer MUST BE of the format stated in "Final Answer Format".
+        5 - Output in JSON format.
         
-        "Your task is to carry out the user's action via the following steps in order"
+        # Your task is to carry out the user's action via the following steps in order
         Step 1 - Process the user's action and determine what information 
                  you need to answer it based on the already retrieved tables and database schema.
         Step 2 - Determine the set of syntactically correct set of PostgreSQL queries necessary to carry out the user's action.
@@ -165,7 +136,7 @@ class SQLAgent:
                      and have determined the user's action was executed successfully.
         Step 5 - Execute ```FinalResponse``` and format the final answer via "Final Answer Format".
         
-        "SQL Rules"
+        # SQL Rules
         Double check the PostgreSQL query for common mistakes, including:
         - Using NOT IN with NULL values
         - Using UNION when UNION ALL should have been used
@@ -176,7 +147,7 @@ class SQLAgent:
         - Casting to the correct data type
         - Using the proper columns for joins
         
-        "Final Answer Format"
+        # Final Answer Format
         1 - SQL Queries: List of SQL queries used.
         2 - Final answer: Chat-like response to user's action.
         3 - Reasoning: Brief summary of how the action was carried out.
@@ -185,7 +156,8 @@ class SQLAgent:
             [("system", template), ("placeholder", "{messages}")]
         )
         return query_gen_prompt | self.model.bind_tools([self.sql_db_query, FinalResponse],
-                                                        tool_choice="required")
+                                                        tool_choice="required",
+                                                        strict=True)
 
     def query_gen_agent(self, state: AgentState) -> dict[str, list[ToolMessage]]:
         """

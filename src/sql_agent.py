@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# sql_chatbot.py
+# sql_agent.py
 #
 # LangGraph SQL Agent
 
@@ -9,7 +9,7 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph, START
 from langgraph.graph.message import AnyMessage, add_messages
-from langgraph.prebuilt import ToolNode, ToolInvocation, ToolExecutor
+from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 
 from langchain_core.messages import ToolMessage

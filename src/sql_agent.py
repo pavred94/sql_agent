@@ -24,7 +24,7 @@ from langchain_core.tools import BaseTool
 class FinalResponse(BaseModel):
     """Final response to the user"""
 
-    final_answer: str = Field(description="A full, accurate and descriptive response.")
+    final_answer: str = Field(description="A full and accurate description of the results of the SQL query.")
     reasoning: str = Field(description="Steps to get to the final answer.")
     sql_query: str = Field(description="SQL queries used to get to the final answer.")
 
@@ -49,6 +49,7 @@ class SQLAgent:
         self.model = model
         self.tools = {t.name: t for t in sql_tools}
         self.sql_db_query = self.tools["sql_db_query"]
+        self.query_generator = self.get_query_generator()
 
         # **Build graph**
         # Nodes
@@ -114,43 +115,46 @@ class SQLAgent:
         template = """
         You are a friendly PostgreSQL expert with a strong attention to detail.
         
-        # Required criteria before execution
+        # Required criteria before "Main Loop"
         1 - Tools are delimited with triple backticks.
         2 - Prompt headers are preceded by a pound sign (#).
-        3 - DO NOT MAKE UP INFORMATION under any circumstances.
+        3 - DO NOT MAKE UP MISSING INFORMATION under any circumstances.
         4 - Your final answer MUST BE of the format stated in "Final Answer Format".
         5 - Output in JSON format.
         
-        # Your task is to carry out the user's action via the following steps in order
-        Step 1 - Process the user's action and determine what information 
+        # Main Loop
+        Your task is to carry out the user's action via the following steps in order:
+        Step 1 - Process the user's action and determine what information \
                  you need to answer it based on the already retrieved tables and database schema.
         Step 2 - Determine the set of syntactically correct set of PostgreSQL queries necessary to carry out the user's action.
                  Reference the "SQL Rules" section for guidelines when generating SQL queries.
                  DO NOT use solely the database schema to answer the user's action unless explicitly told to do so.
         Step 3 - Use ```sql_db_query``` to run the SQL queries against the database. 
-        Step 4 - If at least one of the following numbered criteria is met, go to Step 5, otherwise go to Step 1.
-                 1 - You do not have the information necessary to perform the user's action.
-                 2 - You get a duplicate key error.
-                 3 - You have determined that the user's action was unsuccessful and you cannot resolve it.
-                 4 - All SQL queries were successfully executed, you have double-checked the results 
-                     and have determined the user's action was executed successfully.
+        Step 4 - If at least one of the criteria in "End of Execution" is met, go to Step 5, otherwise go to Step 1.
         Step 5 - Execute ```FinalResponse``` and format the final answer via "Final Answer Format".
         
         # SQL Rules
-        Double check the PostgreSQL query for common mistakes, including:
-        - Using NOT IN with NULL values
-        - Using UNION when UNION ALL should have been used
-        - Using BETWEEN for exclusive ranges
-        - Data type mismatch in predicates
-        - Properly quoting identifiers
-        - Using the correct number of arguments for functions
-        - Casting to the correct data type
-        - Using the proper columns for joins
+        Double-check the PostgreSQL query for common mistakes, including:
+        - Using NOT IN with NULL values.
+        - Using UNION when UNION ALL should have been used.
+        - Using BETWEEN for exclusive ranges.
+        - Data type mismatch in predicates.
+        - Properly quoting identifiers.
+        - Using the correct number of arguments for functions.
+        - Casting to the correct data type.
+        - Using the proper columns for joins.
+        
+        # End of Execution
+        - You do not have the information necessary to perform the user's action.
+        - You get a duplicate key error.
+        - You have determined that the user's action was unsuccessful and you cannot resolve it.
+        - All SQL queries were successfully executed (no errors), you have double-checked the results 
+             and have determined the user's action was executed successfully.
         
         # Final Answer Format
-        1 - SQL Queries: List of SQL queries used.
-        2 - Final answer: Chat-like response to user's action.
-        3 - Reasoning: Brief summary of how the action was carried out.
+        final_answer: Chat-like response to user's action.
+        reasoning: Brief summary of how the action was carried out.
+        sql_query: List of SQL queries used.
         """
         query_gen_prompt = ChatPromptTemplate.from_messages(
             [("system", template), ("placeholder", "{messages}")]
@@ -165,7 +169,7 @@ class SQLAgent:
         to generate a query or stop and generate a response for the user.
         """
 
-        message = self.get_query_generator().invoke(state)
+        message = self.query_generator.invoke(state)
         tool_messages = []
         if message.tool_calls:
             for tc in message.tool_calls:
@@ -179,7 +183,6 @@ class SQLAgent:
                     )
         return {"messages": [message] + tool_messages}
 
-    # Define a conditional edge to decide whether to continue or end the graph
     def should_continue(self, state: AgentState) -> Literal["end", "go_back_qa", "continue"]:
         """
         Defines conditional edge to determine whether to return to query_gen_agent,
@@ -190,10 +193,10 @@ class SQLAgent:
         last_message = messages[-1]
         if last_message.content.startswith("Error:"):
             return "go_back_qa"  # Back to query_gen_agent
-        elif (getattr(last_message, "tool_calls", None)) and (last_message.tool_calls[0]["name"] == "sql_db_query"):
-            return "continue"  # Go to sql_db_query
-        else:
-            return "end"  # End if no tool call
+        # End if no tool calls or LLM invoked FinalResponse
+        if not last_message.tool_calls or last_message.tool_calls[0]["name"] == FinalResponse.__name__:
+            return "end"
+        return "continue"  # Go to sql_db_query
 
     def handle_tool_error(self, state) -> dict:
         """ Generates Tool error message for LLM to process """
